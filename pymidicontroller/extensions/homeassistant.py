@@ -156,27 +156,25 @@ class Switch(ControllerExtension):
     def __post_init__(self):
         super().__post_init__()
         self.set_metadata('update_frequency', 0.005)
-        if self.client == None:
+        if self.client is None:
             import sys; sys.exit('No client registered')
+        self.set_attribute('button_state', 0)
 
     def update(self, attribute, value):
-        last_button_state = self.get_attribute('button_state')
-
+        last_button_state = self.get_attribute('button_state') or 0
         button_state = 1 if value > 0 else 0
-        
+
+        # Detect rising edge (press)
         if last_button_state == 0 and button_state == 1:
             self.set_metadata('post_flag', True)
+
         self.set_attribute('button_state', button_state)
         super().update(attribute, value)
 
     def execute(self):
-        post_flag = self.get_metadata('post_flag')
-        if post_flag:
-            
-            data = {}
-            data['entity_id'] = self.entity_id
-
-            post_data = self.client.post_data(data, 'switch', 'toggle')
-            self.set_metadata('post_flag', not post_data)
-            return not post_data
+        if self.get_metadata('post_flag'):
+            data = {'entity_id': self.entity_id}
+            success = self.client.post_data(data, 'switch', 'toggle')
+            self.set_metadata('post_flag', False)
+            return not success
         return False

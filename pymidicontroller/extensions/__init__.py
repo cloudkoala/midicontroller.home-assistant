@@ -1,6 +1,5 @@
 __all__ = [
     'common', 
-    'homeassistant', 
-    'volumemixer',
+    'homeassistant',
     'arbitrary'
     ]

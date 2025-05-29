@@ -4,7 +4,7 @@ comtypes==1.4.11
 idna==3.10
 mido==1.2.10
 psutil==7.0.0
-pycaw==20240210
+
 
 python-rtmidi==1.5.8
 requests==2.26.0
