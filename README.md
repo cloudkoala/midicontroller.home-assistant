@@ -1,3 +1,12 @@
+This is a fork of https://github.com/Kamaroth92/pymidicontroller
+
+The readme below is the original from that repo. 
+
+This fork is aimed at furthering the Home Assistant and Midi integration and is meant to be run on a Raspberry Pi.
+
+I will update the docs once a few more features are added!
+
+
 # pymidicontroller
 
 ## Introduction
