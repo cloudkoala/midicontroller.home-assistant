@@ -3,7 +3,7 @@
 from pymidicontroller.classes.controller import Controller
 from pymidicontroller.extensions import *
 from midi_config import load_midi_config
-from instant_feedback import create_instant_feedback_system
+from instant_feedback import create_instant_feedback_system, create_instant_light_toggle
 from datetime import datetime
 import os
 import time
@@ -39,9 +39,22 @@ if __name__ == '__main__':
     lightbar = homeassistant.Light(entity_id='light.lightbar', client=homeassistant_client)
     tripod = homeassistant.CyncLight(entity_id='light.orange_tripod', client=homeassistant_client)
     rattan = homeassistant.CyncLight(entity_id='light.rattan_floor_lamp', client=homeassistant_client)
+    strawberry = homeassistant.CyncLight(entity_id='light.strawberry', client=homeassistant_client)
+    jupiter = homeassistant.CyncLight(entity_id='light.jupiter', client=homeassistant_client)
+    rice_planet = homeassistant.CyncLight(entity_id='light.rice_planet', client=homeassistant_client)
+    pebble_lamp = homeassistant.CyncLight(entity_id='light.pebble_lamp', client=homeassistant_client)
+    akari_table_lamp = homeassistant.CyncLight(entity_id='light.akari_table_lamp', client=homeassistant_client)
+    office_orb = homeassistant.CyncLight(entity_id='light.office_orb', client=homeassistant_client)
+    sunroom_lightbar = homeassistant.Light(entity_id='light.sunroom_lightbar', client=homeassistant_client)
+    
 
     # Light control mappings (CC-based)
     print("🔧 Setting up light controls...")
+    # Lightbar - HS channels
+    device.register_mapping(1, 77, lightbar, 'brightness_channel', message_type='cc')
+    device.register_mapping(1, 13, lightbar, 'hue_channel', message_type='cc')
+    device.register_mapping(1, 29, lightbar, 'saturation_channel', message_type='cc')
+
     # Tripod (Cync light) - RGB channels
     device.register_mapping(1, 14, tripod, 'red_channel', message_type='cc')
     device.register_mapping(1, 30, tripod, 'green_channel', message_type='cc')
@@ -54,10 +67,28 @@ if __name__ == '__main__':
     device.register_mapping(1, 51, rattan, 'blue_channel', message_type='cc')
     device.register_mapping(1, 79, rattan, 'brightness_channel', message_type='cc')
 
-    # Lightbar - HS channels
-    device.register_mapping(1, 77, lightbar, 'brightness_channel', message_type='cc')
-    device.register_mapping(1, 13, lightbar, 'hue_channel', message_type='cc')
-    device.register_mapping(1, 29, lightbar, 'saturation_channel', message_type='cc')
+    # Pebble Lamp (Cync light) - RGB channels
+    device.register_mapping(1, 16, pebble_lamp, 'red_channel', message_type='cc')
+    device.register_mapping(1, 32, pebble_lamp, 'green_channel', message_type='cc')
+    device.register_mapping(1, 52, pebble_lamp, 'blue_channel', message_type='cc')
+    device.register_mapping(1, 80, pebble_lamp, 'brightness_channel', message_type='cc')
+    # Jupiter (Cync light) - RGB channels
+    device.register_mapping(1, 17, jupiter, 'red_channel', message_type='cc')
+    device.register_mapping(1, 33, jupiter, 'green_channel', message_type='cc')
+    device.register_mapping(1, 53, jupiter, 'blue_channel', message_type='cc')  
+    device.register_mapping(1, 81, jupiter, 'brightness_channel', message_type='cc')
+    # Strawberry (Cync light) - RGB channels
+    device.register_mapping(1, 18, strawberry, 'red_channel', message_type='cc')
+    device.register_mapping(1, 34, strawberry, 'green_channel', message_type='cc')
+    device.register_mapping(1, 54, strawberry, 'blue_channel', message_type='cc')
+    device.register_mapping(1, 82, strawberry, 'brightness_channel', message_type='cc')
+    # Sunroom Lightbar - HS channels
+    device.register_mapping(1, 83, sunroom_lightbar, 'brightness_channel', message_type='cc')
+    device.register_mapping(1, 19, sunroom_lightbar, 'hue_channel', message_type='cc')
+    device.register_mapping(1, 35, sunroom_lightbar, 'saturation_channel', message_type='cc')
+
+
+
 
     print("🔧 Setting up INSTANT FEEDBACK switches...")
     
@@ -86,14 +117,46 @@ if __name__ == '__main__':
         note=38  # Note 38 (D2)
     )
 
+    print("🔧 Setting up INSTANT FEEDBACK light toggles...")
+    
+    # Create light toggle with same instant feedback behavior
+    office_orb_switch, office_orb_feedback = create_instant_light_toggle(
+        entity_id='light.office_orb',
+        client=homeassistant_client,
+        controller=device,
+        channel=1,
+        note=40  # Note 40 (E1) as requested
+    )
+
+    # Create light toggle for Rice Planet
+    rice_planet_switch, rice_planet_feedback = create_instant_light_toggle(
+        entity_id='light.rice_planet',
+        client=homeassistant_client,
+        controller=device,
+        channel=1,
+        note=41  # Note 41 (F1)
+    )
+
+        # Create light toggle with same instant feedback behavior
+    akari_table_lamp_switch, akari_table_lamp_feedback = create_instant_light_toggle(
+        entity_id='light.akari_table_lamp',
+        client=homeassistant_client,
+        controller=device,
+        channel=1,
+        note=42
+    )  # Note 42 (F#1)
+    
+
     # Register NOTE mappings for switches
     print("🔧 Registering instant feedback switch mappings...")
     device.register_mapping(1, 36, wavy_wub_switch, message_type='note')
     device.register_mapping(1, 37, sunrise_switch, message_type='note')
     device.register_mapping(1, 38, lanterns_switch, message_type='note')
+    device.register_mapping(1, 40, office_orb_switch, message_type='note')
+    device.register_mapping(1, 41, rice_planet_switch, message_type='note')  
+    device.register_mapping(1, 42, akari_table_lamp_switch, message_type='note')  
 
     # Register other switches (if you have more)
-    circadian_lighting = homeassistant.Switch(entity_id='switch.circadian_lighting_circadian_lighting', client=homeassistant_client)
     # Add more switch mappings as needed...
 
     # Register feedback systems
@@ -102,6 +165,9 @@ if __name__ == '__main__':
         device.register_feedback(wavy_wub_feedback)
         device.register_feedback(sunrise_feedback)
         device.register_feedback(lanterns_feedback)
+        device.register_feedback(office_orb_feedback)
+        device.register_feedback(akari_table_lamp_feedback)
+        device.register_feedback(rice_planet_feedback)
         print("✅ Ultra-fast LED feedback configured")
     else:
         print("⚠️  No output port - LED feedback disabled")
