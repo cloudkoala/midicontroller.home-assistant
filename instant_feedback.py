@@ -22,7 +22,7 @@ class InstantFeedbackLight(ControllerExtension):
         if self.midi_note is None:
             import sys; sys.exit('No MIDI Note specified for InstantFeedbackLight')
         
-        self.set_metadata('update_frequency', 0.1)  # Check state frequently
+        self.set_metadata('update_frequency', 0.2)  # Check state frequently
         self.set_metadata('last_ha_state', None)
         self.set_metadata('last_check_time', 0)
         self.set_metadata('pending_change', False)
