@@ -1,105 +1,138 @@
+# main.py - Complete MIDI controller with ultra-fast LED feedback
+
 from pymidicontroller.classes.controller import Controller
 from pymidicontroller.extensions import *
-import mido
+from midi_config import load_midi_config
+from instant_feedback import create_instant_feedback_system
 from datetime import datetime
 import os
+import time
 from dotenv import load_dotenv
 
-load_dotenv()  # loads from .env by default
+load_dotenv()
 api_key = os.getenv("API_KEY")
 
-input_names = mido.get_input_names()
-my_midi_controller = input_names[1]  # Automatically pick the first one
-print(f"Selected MIDI input: {my_midi_controller}")
+# Load MIDI configuration
+print("🎵 Loading MIDI configuration...")
+midi_config = load_midi_config()
 
+if not midi_config.config_loaded:
+    print("❌ MIDI configuration not found!")
+    print("Please run: python midi_setup.py")
+    exit(1)
 
-# my_midi_controller = mido.get_input_names(0)
+print(f"✅ Using MIDI Input: {midi_config.get_input_port()}")
+print(f"✅ Using MIDI Output: {midi_config.get_output_port() or 'None'}")
+
+# Home Assistant setup
 homeassistant_uri = "http://homeassistant.local:8123"
 homeassistant_token = api_key
 
 if __name__ == '__main__':
-    # Match MIDI device name
-    device_name = None
-    for name in mido.get_input_names():
-        if name.startswith(my_midi_controller):
-            device_name = name
-            break
-
-    if not device_name:
-        raise RuntimeError("MIDI device not found. Check name with mido.get_input_names()")
-
     # Create the MIDI Controller
-    device = Controller(device_name)
+    device = Controller()
 
     # Home Assistant integration
     homeassistant_client = homeassistant.Client(homeassistant_uri, homeassistant_token)
 
-    # Devices
-    # Regular lights work normally
+    # Devices - Your existing light controls
     lightbar = homeassistant.Light(entity_id='light.lightbar', client=homeassistant_client)
-    
-    # Cync lights need special handling
     tripod = homeassistant.CyncLight(entity_id='light.orange_tripod', client=homeassistant_client)
     rattan = homeassistant.CyncLight(entity_id='light.rattan_floor_lamp', client=homeassistant_client)
-    
-    # If you have other Cync lights, add them as CyncLight objects:
-    # pebble = homeassistant.CyncLight(entity_id='light.pebble_lamp', client=homeassistant_client)
-    # jupiter = homeassistant.CyncLight(entity_id='light.jupiter', client=homeassistant_client)
-    
 
-    # Switches
-    sunrise = homeassistant.Switch(entity_id='switch.sunrise_lamp', client=homeassistant_client)
-    lanterns = homeassistant.Switch(entity_id='switch.lanterns', client=homeassistant_client)
-    # spotify = homeassistant.Media(entity_id='media_player.spotify', client=homeassistant_client)
-    wavy_wub = homeassistant.Switch(entity_id='switch.wavy_wub', client=homeassistant_client)
-
-
-    circadian_lighting = homeassistant.Switch(entity_id='switch.circadian_lighting_circadian_lighting', client=homeassistant_client)
-    cycle_color_mode = arbitrary.Toggle(func=tripod.change_colour_mode)
-
-    # Volume controls
-    # master_volume = volumemixer.Device()
-    # spotify_volume = volumemixer.Application(application='Spotify.exe')
-    # discord_volume = volumemixer.Application(application='Discord.exe')
-    # tarkov_volume = volumemixer.Application(application='EscapeFromTarkov.exe')
-    # r6_volume = volumemixer.Application(application='RainbowSix.exe')
-
-    # Controller mappings
+    # Light control mappings (CC-based)
+    print("🔧 Setting up light controls...")
     # Tripod (Cync light) - RGB channels
-    device.register_mapping(1, 14, tripod, 'red_channel')
-    device.register_mapping(1, 30, tripod, 'green_channel')
-    device.register_mapping(1, 50, tripod, 'blue_channel')
-    device.register_mapping(1, 78, tripod, 'brightness_channel')
+    device.register_mapping(1, 14, tripod, 'red_channel', message_type='cc')
+    device.register_mapping(1, 30, tripod, 'green_channel', message_type='cc')
+    device.register_mapping(1, 50, tripod, 'blue_channel', message_type='cc')
+    device.register_mapping(1, 78, tripod, 'brightness_channel', message_type='cc')
 
-    # Tripod (Cync light) - RGB channels
-    device.register_mapping(1, 15, rattan, 'red_channel')
-    device.register_mapping(1, 31, rattan, 'green_channel')
-    device.register_mapping(1, 51, rattan, 'blue_channel')
-    device.register_mapping(1, 79, rattan, 'brightness_channel')
+    # Rattan (Cync light) - RGB channels
+    device.register_mapping(1, 15, rattan, 'red_channel', message_type='cc')
+    device.register_mapping(1, 31, rattan, 'green_channel', message_type='cc')
+    device.register_mapping(1, 51, rattan, 'blue_channel', message_type='cc')
+    device.register_mapping(1, 79, rattan, 'brightness_channel', message_type='cc')
 
     # Lightbar - HS channels
-    device.register_mapping(1, 77, lightbar, 'brightness_channel')
-    device.register_mapping(1, 13, lightbar, 'hue_channel')
-    device.register_mapping(1, 29, lightbar, 'saturation_channel')
+    device.register_mapping(1, 77, lightbar, 'brightness_channel', message_type='cc')
+    device.register_mapping(1, 13, lightbar, 'hue_channel', message_type='cc')
+    device.register_mapping(1, 29, lightbar, 'saturation_channel', message_type='cc')
 
+    print("🔧 Setting up INSTANT FEEDBACK switches...")
+    
+    # Create switches with ultra-fast LED feedback
+    wavy_wub_switch, wavy_wub_feedback = create_instant_feedback_system(
+        entity_id='switch.wavy_wub',
+        client=homeassistant_client,
+        controller=device,
+        channel=1,
+        note=36  # Note 36 (C2)
+    )
+    
+    sunrise_switch, sunrise_feedback = create_instant_feedback_system(
+        entity_id='switch.sunrise_lamp',
+        client=homeassistant_client,
+        controller=device,
+        channel=1,
+        note=37  # Note 37 (C#2)
+    )
+    
+    lanterns_switch, lanterns_feedback = create_instant_feedback_system(
+        entity_id='switch.lanterns',
+        client=homeassistant_client,
+        controller=device,
+        channel=1,
+        note=38  # Note 38 (D2)
+    )
 
-    # Switches
-    # device.register_mapping(1, 26, cycle_color_mode)
-    # device.register_mapping(1, 31, circadian_lighting)
-    device.register_mapping(1, 43, wavy_wub)
-    device.register_mapping(1, 42, sunrise)
-    device.register_mapping(1, 41, lanterns)
+    # Register NOTE mappings for switches
+    print("🔧 Registering instant feedback switch mappings...")
+    device.register_mapping(1, 36, wavy_wub_switch, message_type='note')
+    device.register_mapping(1, 37, sunrise_switch, message_type='note')
+    device.register_mapping(1, 38, lanterns_switch, message_type='note')
 
-    # Volume (commented out)
-    # device.register_mapping(1, 11, master_volume)
-    # device.register_mapping(1, 3, spotify_volume)
-    # device.register_mapping(1, 4, discord_volume)
-    # device.register_mapping(1, 5, tarkov_volume)
-    # device.register_mapping(1, 5, r6_volume)
+    # Register other switches (if you have more)
+    circadian_lighting = homeassistant.Switch(entity_id='switch.circadian_lighting_circadian_lighting', client=homeassistant_client)
+    # Add more switch mappings as needed...
 
-    print("MIDI Controller Ready!")
-    print(f"Orange Tripod: Using CyncLight class (sends color and brightness separately)")
-    print(f"Lightbar: Using standard Light class")
-    print("\nNote: Cync lights require color to be sent WITHOUT brightness, then brightness separately.")
+    # Register feedback systems
+    if midi_config.get_output_port():
+        print("🔄 Registering LED feedback systems...")
+        device.register_feedback(wavy_wub_feedback)
+        device.register_feedback(sunrise_feedback)
+        device.register_feedback(lanterns_feedback)
+        print("✅ Ultra-fast LED feedback configured")
+    else:
+        print("⚠️  No output port - LED feedback disabled")
+    
+    print("\n" + "="*80)
+    print("🎛️  PROFESSIONAL MIDI CONTROLLER READY!")
+    print("="*80)
+    print("\n🚦 LED FEEDBACK BEHAVIOR:")
+    print("   🔴 RED    = Switch is OFF (steady state)")
+    print("   🟠 AMBER  = Button pressed - INSTANT response!")
+    print("   🟢 GREEN  = Switch is ON (confirmed state)")
+    print("\n⚡ PERFORMANCE FEATURES:")
+    print("   • Sub-millisecond LED response")
+    print("   • 200Hz MIDI polling (5ms intervals)")
+    print("   • Ultra-responsive switches (1ms)")
+    print("   • Real-time state confirmation")
+    print("   • External change detection")
+    print("   • Timeout protection (3s)")
+    print("\n🎵 SWITCH MAPPINGS (Note-based):")
+    print("   • Note 36 (C2)  → wavy_wub")
+    print("   • Note 37 (C#2) → sunrise") 
+    print("   • Note 38 (D2)  → lanterns")
+    print("\n🎛️  LIGHT CONTROLS (CC-based):")
+    print("   • Tripod RGB: CC 14,30,50 + Brightness: CC 78")
+    print("   • Rattan RGB: CC 15,31,51 + Brightness: CC 79") 
+    print("   • Lightbar HSB: CC 13,29,77")
+    print("\n💡 READY TO USE!")
+    print("   • Press switches for instant amber → final state")
+    print("   • Control lights with knobs/faders")
+    print("   • LEDs stay in sync with Home Assistant")
+    print("\nPress Ctrl+C to stop")
+    print("="*80)
     
     device.loop()

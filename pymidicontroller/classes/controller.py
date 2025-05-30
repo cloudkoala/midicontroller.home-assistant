@@ -1,17 +1,22 @@
+# controller.py - Complete optimized controller with Note and CC support
+
 from dataclasses import dataclass, field
 from time import time, sleep
 import mido
 import sys
 
 from pymidicontroller.extensions import common
+from midi_config import MidiConfig
 
 @dataclass()
 class ControlClass:
-    """Midi control class values"""
+    """Midi control class values - supports both CC and Note"""
     channel: int
-    control: int
+    control: int = None      # For CC messages
+    note: int = None         # For Note messages  
     target: all = None
     data: all = 'value'
+    message_type: str = 'cc' # 'cc' or 'note'
     
     value: float = 0
     lower_left: int = 0
@@ -79,26 +84,52 @@ class ControllerExtension:
 
 @dataclass()
 class Controller:
-    """Midi controller"""
-    name: str
+    """High-performance MIDI controller with automatic configuration and dual message support"""
+    name: str = None
     controls: list[ControlClass] = field(default_factory=list)
-    update_rate: float = 0.01
+    feedback_extensions: list[ControllerExtension] = field(default_factory=list)
+    update_rate: float = 0.005  # 200Hz for ultra-responsive performance
 
     is_connected: bool = False
     initialized: bool = False
+    output_device: mido.ports.BaseOutput = None
+    midi_config: MidiConfig = None
+
+    def __post_init__(self):
+        """Load MIDI configuration on initialization"""
+        self.midi_config = MidiConfig()
+        if not self.midi_config.config_loaded:
+            print("❌ MIDI configuration not loaded!")
+            print("Please run 'python midi_setup.py' to configure your MIDI ports.")
+            sys.exit(1)
+        
+        if not self.name:
+            self.name = self.midi_config.get_input_port()
 
     def init(self):
-        if self.name in mido.get_input_names():
-            midi_device = mido.open_input(self.name)
+        """Initialize MIDI connections using configured ports"""
+        try:
+            midi_device = self.midi_config.open_input()
+            print(f'✅ MIDI input opened: {self.midi_config.get_input_port()}')
+            
+            self.output_device = self.midi_config.open_output()
+            if self.output_device:
+                print(f'✅ MIDI output opened: {self.midi_config.get_output_port()}')
+            else:
+                print('⚠️  No MIDI output configured - LED feedback disabled')
+            
             self.initialized = True
-            self.check_connection()
-            print(f'Device {self.name} connected.')
+            self.is_connected = True
+            print(f'🎛️  Controller ready!')
             return midi_device
-        else:
+            
+        except Exception as e:
+            print(f"❌ Failed to initialize MIDI: {e}")
             return None
 
     def check_connection(self):
-        if self.initialized and self.name in mido.get_input_names():
+        """Check if MIDI connections are still valid"""
+        if self.initialized and self.midi_config.validate_ports():
             self.is_connected = True
         else:
             self.is_connected = False
@@ -107,19 +138,72 @@ class Controller:
     def get_controls(self):
         return self.controls
 
-    def register_mapping(self, channel, control, target, data=None):
-        cc = ControlClass(channel, control, target, data)
+    def register_mapping(self, channel, control_or_note, target, data=None, message_type='cc'):
+        """Register mapping for CC or Note messages"""
+        if message_type == 'note':
+            cc = ControlClass(channel=channel, note=control_or_note, target=target, data=data, message_type='note')
+            print(f"✅ Registered Note mapping: Ch.{channel} Note.{control_or_note} → {type(target).__name__}")
+        else:
+            cc = ControlClass(channel=channel, control=control_or_note, target=target, data=data, message_type='cc')
+            print(f"✅ Registered CC mapping: Ch.{channel} CC.{control_or_note} → {type(target).__name__}")
+        
         self.controls.append(cc)
 
+    def register_feedback(self, feedback_extension):
+        """Register a feedback extension that will be executed in the main loop"""
+        self.feedback_extensions.append(feedback_extension)
+        print(f"✅ Registered feedback for {getattr(feedback_extension, 'entity_id', 'unknown')}")
+
+    def send_note(self, channel, note, velocity):
+        """Send MIDI Note On/Off message to control LEDs"""
+        if self.output_device is None:
+            return False
+        
+        try:
+            if velocity > 0:
+                msg = mido.Message('note_on', channel=channel-1, note=note, velocity=velocity)
+            else:
+                msg = mido.Message('note_off', channel=channel-1, note=note, velocity=0)
+            
+            self.output_device.send(msg)
+            return True
+        except Exception as e:
+            print(f"❌ Error sending MIDI Note (ch:{channel}, note:{note}, vel:{velocity}): {e}")
+            return False
+
+    def send_cc(self, channel, control, value):
+        """Send MIDI Control Change message"""
+        if self.output_device is None:
+            return False
+        
+        try:
+            msg = mido.Message('control_change', channel=channel-1, control=control, value=value)
+            self.output_device.send(msg)
+            return True
+        except Exception as e:
+            print(f"❌ Error sending MIDI CC (ch:{channel}, cc:{control}, val:{value}): {e}")
+            return False
+
     def update_control(self, channel, control, value):
-        channel = channel+1
+        """Handle CC messages"""
+        channel = channel + 1
         for cc in self.get_controls():
-            if cc.channel == channel and cc.control == control:
+            if cc.message_type == 'cc' and cc.channel == channel and cc.control == control:
                 if cc.data == None:
                     cc.data = 'value'
                 cc.target.update(cc.data, value)
 
+    def update_note(self, channel, note, velocity):
+        """Handle Note On/Off messages"""
+        channel = channel + 1
+        for cc in self.get_controls():
+            if cc.message_type == 'note' and cc.channel == channel and cc.note == note:
+                if cc.data == None:
+                    cc.data = 'value'
+                cc.target.update(cc.data, velocity)
+
     def loop(self):
+        """Ultra-high performance main loop with 200Hz polling"""
         midi_device = None
 
         while True:
@@ -127,17 +211,30 @@ class Controller:
                 self.check_connection()
                 while not self.is_connected:
                     midi_device = self.init()
+                    if midi_device is None:
+                        print("❌ Failed to connect to MIDI device. Retrying in 2 seconds...")
+                        sleep(2)
 
-                ignore_list = []
-                for message in common.reversed_iterator(midi_device.iter_pending()):
+                # Handle incoming MIDI messages - PROCESS ALL for zero latency
+                for message in midi_device.iter_pending():
                     formatted_message = vars(message)
+                    
                     if formatted_message['type'] == 'control_change':
                         control = formatted_message['control']
                         value = formatted_message['value']
                         channel = formatted_message['channel']
-                        if f'{channel}:{control}' not in ignore_list:
-                            self.update_control(channel, control, value)
-                            ignore_list.append(f'{channel}:{control}')
+                        self.update_control(channel, control, value)
+                    
+                    elif formatted_message['type'] in ['note_on', 'note_off']:
+                        note = formatted_message['note']
+                        velocity = formatted_message['velocity']
+                        channel = formatted_message['channel']
+                        # For note_off, set velocity to 0
+                        if formatted_message['type'] == 'note_off':
+                            velocity = 0
+                        self.update_note(channel, note, velocity)
+                
+                # Execute control extensions
                 ignore_list = []
                 for cc in self.get_controls():
                     target = cc.target
@@ -145,7 +242,32 @@ class Controller:
                         target.invoke()
                         ignore_list.append(target)
 
-                sleep(self.update_rate)
+                # Execute feedback extensions
+                feedback_ignore_list = []
+                for feedback_ext in self.feedback_extensions:
+                    if feedback_ext not in feedback_ignore_list:
+                        try:
+                            feedback_ext.invoke()
+                            feedback_ignore_list.append(feedback_ext)
+                        except Exception as e:
+                            print(f"❌ Error in feedback extension: {e}")
+
+                # Ultra-fast loop for maximum responsiveness
+                sleep(self.update_rate)  # 5ms = 200Hz
+                
             except KeyboardInterrupt:
-                print('Exiting...')
+                print('\n🛑 Shutting down...')
+                self.cleanup()
                 sys.exit()
+            except Exception as e:
+                print(f"❌ Error in controller loop: {e}")
+                sleep(1)
+
+    def cleanup(self):
+        """Clean up MIDI connections"""
+        try:
+            if self.output_device:
+                self.output_device.close()
+                print("✅ MIDI output closed")
+        except Exception as e:
+            print(f"Error closing MIDI output: {e}")

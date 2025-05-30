@@ -10,6 +10,24 @@ class Client:
     uri: str
     token: str
 
+    def get_state(self, entity_id):
+        """Get the current state of a Home Assistant entity"""
+        headers = {
+            'Authorization': f'Bearer {self.token}', 
+            'Content-Type': 'application/json'
+        }
+        try:
+            response = requests.get(f'{self.uri}/api/states/{entity_id}', headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                return data.get('state')
+            else:
+                print(f"Error getting state for {entity_id}: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"Exception getting state for {entity_id}: {e}")
+            return None
+        
     def post_data(self, data, domain, service):
         headers = {
             'Authorization': f'Bearer {self.token}', 
@@ -20,7 +38,78 @@ class Client:
         if response.status_code != 200:
             print(f"Error: {response.status_code} - {response.text}")
         return response.status_code == 200
+    
+@dataclass
+class FeedbackLight(ControllerExtension):
+    """Monitors Home Assistant entity state and controls MIDI feedback LED using Note messages for toggle buttons"""
+    entity_id: str = None
+    client: Client = None
+    midi_channel: int = 1
+    midi_note: int = None
+    controller_device: object = None
+    led_color: str = 'red'
 
+    def __post_init__(self):
+        super().__post_init__()
+        if self.client is None:
+            import sys; sys.exit('No client registered for FeedbackLight')
+        if self.controller_device is None:
+            import sys; sys.exit('No controller device registered for FeedbackLight')
+        if self.midi_note is None:
+            import sys; sys.exit('No MIDI Note specified for FeedbackLight')
+        
+        self.set_metadata('update_frequency', 1.0)  # Check every second
+        self.set_metadata('last_state', None)
+        self.set_metadata('last_check_time', 0)
+
+    def _get_velocity_for_color(self, on=True):
+        """Get the correct velocity value for LED color from Launch Control XL manual"""
+        if not on:
+            return 0  # LED off
+        
+        # Values from the official manual (page 4)
+        color_map = {
+            'red': 15,      # 0Fh - Red Full
+            'green': 60,    # 3Ch - Green Full  
+            'amber': 63,    # 3Fh - Amber Full
+            'yellow': 62    # 3Eh - Yellow Full
+        }
+        return color_map.get(self.led_color, 15)
+
+    def execute(self):
+        current_time = time.time()
+        last_check = self.get_metadata('last_check_time')
+        
+        if current_time - last_check < self.get_metadata('update_frequency'):
+            return False
+            
+        try:
+            current_state = self.client.get_state(self.entity_id)
+            last_state = self.get_metadata('last_state')
+            
+            if current_state != last_state and current_state is not None:
+                if current_state == 'on':
+                    velocity = self._get_velocity_for_color(True)
+                    success = self.controller_device.send_note(self.midi_channel, self.midi_note, velocity)
+                    if success:
+                        print(f"✓ LED ON ({self.led_color}, Note {self.midi_note}) for {self.entity_id}")
+                else:
+                    success = self.controller_device.send_note(self.midi_channel, self.midi_note, 0)
+                    if success:
+                        print(f"✓ LED OFF (Note {self.midi_note}) for {self.entity_id}")
+                
+                if success:
+                    self.set_metadata('last_state', current_state)
+            
+            self.set_metadata('last_check_time', current_time)
+            
+        except Exception as e:
+            print(f"Error in FeedbackLight for {self.entity_id}: {e}")
+            self.set_metadata('last_check_time', current_time)
+        
+        return False
+
+    
 @dataclass()
 class Light(ControllerExtension):
     entity_id: str = None
@@ -169,6 +258,41 @@ class Switch(ControllerExtension):
             self.set_metadata('post_flag', True)
 
         self.set_attribute('button_state', button_state)
+        super().update(attribute, value)
+
+    def execute(self):
+        if self.get_metadata('post_flag'):
+            data = {'entity_id': self.entity_id}
+            success = self.client.post_data(data, 'switch', 'toggle')
+            self.set_metadata('post_flag', False)
+            return not success
+        return False
+    
+@dataclass
+class ToggleSwitch(ControllerExtension):
+    """Handles toggle note-based switches - simpler than momentary switches"""
+    entity_id: str = None
+    client: Client = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.set_metadata('update_frequency', 0.1)  # Fast response for user actions
+        if self.client is None:
+            import sys; sys.exit('No client registered')
+        self.set_attribute('last_note_state', 0)
+
+    def update(self, attribute, value):
+        # For toggle buttons, we get note on/off messages
+        # Note on (value > 0) = button pressed down
+        # Note off (value = 0) = button released
+        last_state = self.get_attribute('last_note_state') or 0
+        current_state = 1 if value > 0 else 0
+
+        # Only trigger on note ON (button press), not note OFF (release)
+        if last_state == 0 and current_state == 1:
+            self.set_metadata('post_flag', True)
+
+        self.set_attribute('last_note_state', current_state)
         super().update(attribute, value)
 
     def execute(self):
